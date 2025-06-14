@@ -1,0 +1,84 @@
+{
+  "blocks": [
+    {
+      "type": "answerfilter",
+      "name": "Filtertaak",
+      "question": "Wat is het antwoord?",
+      "color": "#ffffe0",
+      "schema": "default",
+      "pos": [
+        -125.0,
+        52.0
+      ],
+      "uid": "40ab282d-39d5-4444-8728-796d74dc09c9",
+      "filter_uid": "87a7741e-c205-4390-8e6b-4fc17b3f6a5b",
+      "filter_waarde": "Ja",
+      "operator": "="
+    },
+    {
+      "type": "answerfilter",
+      "name": "Test",
+      "question": "Antwoord is: Nee",
+      "color": "#ffffe0",
+      "schema": "default",
+      "pos": [
+        86.0,
+        -155.0
+      ],
+      "uid": "4bfbbcd3-a6a1-4977-9536-e7a2ae8191a8",
+      "filter_uid": "87a7741e-c205-4390-8e6b-4fc17b3f6a5b",
+      "filter_waarde": "Nee",
+      "operator": "="
+    },
+    {
+      "type": "answerfilter",
+      "name": "Filter: Ja",
+      "question": "Antwoord is: Ja",
+      "color": "#ffffe0",
+      "schema": "default",
+      "pos": [
+        -264.0,
+        -158.0
+      ],
+      "uid": "8f119b42-d935-45d8-bdc5-ae132a12fd78",
+      "filter_uid": "87a7741e-c205-4390-8e6b-4fc17b3f6a5b",
+      "filter_waarde": "Ja",
+      "operator": "="
+    },
+    {
+      "type": "popup",
+      "name": "Popup",
+      "question": "Vraag?",
+      "answer_type": "keuze",
+      "options": [
+        "Ja",
+        "Nee"
+      ],
+      "default_date": null,
+      "set_target": null,
+      "set_field": null,
+      "set_target_uid": null,
+      "color": "#90ee90",
+      "schema": "default",
+      "pos": [
+        -97.0,
+        -156.0
+      ],
+      "uid": "87a7741e-c205-4390-8e6b-4fc17b3f6a5b"
+    }
+  ],
+  "connections": [
+    {
+      "source_id": "87a7741e-c205-4390-8e6b-4fc17b3f6a5b",
+      "target_id": "4bfbbcd3-a6a1-4977-9536-e7a2ae8191a8",
+      "label": "Nee",
+      "active_for_options": []
+    },
+    {
+      "source_id": "87a7741e-c205-4390-8e6b-4fc17b3f6a5b",
+      "target_id": "8f119b42-d935-45d8-bdc5-ae132a12fd78",
+      "label": "Ja",
+      "active_for_options": []
+    }
+  ]
+}
