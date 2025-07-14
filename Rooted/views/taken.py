@@ -3,6 +3,8 @@ from PySide6.QtWidgets import (
     QWidget, QVBoxLayout, QTableWidget, QTableWidgetItem,
     QLabel, QPushButton, QHBoxLayout
 )
+from controllers.completion import handle_task_completion
+
 class TakenDashboard(QWidget):
     def __init__(self, parent=None):
         super().__init__(parent)
