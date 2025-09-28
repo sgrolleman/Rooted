@@ -5,175 +5,108 @@ DATABASE_PATH = "data/rooted.db"
 
 class Planner:
     def __init__(self):
-        self.weights = {
-            "deadline_type": {
-                "harde": 5,
-                "zachte": 3,
-                "advies": 2,
-                "geen": 1,
-            },
-            "prioriteit": {i: i for i in range(1, 6)},
-            "deadline_group": {
-                "vandaag": 5,
-                "morgen": 4,
-                "deze week": 3,
-                "komende 2 weken": 2,
-                "komende maand": 1,
-                "meer dan een maand": 0,
-            },
-            "risk_factor": 1,
-            "leftover": 1
+        # Prioriteiten mappen naar gewichten
+        self.priority_weights = {
+            "Zeer hoog": 5,
+            "Hoog": 4,
+            "Normaal": 3,
+            "Laag": 2,
+            "Geen": 1,
         }
 
     def calculate_task_score(self, taak):
         score = 0
-        score += self.weights["deadline_type"].get(taak["deadline_type"], 0)
-        # Fallback voor ontbrekende prioriteit
-        prioriteit = taak.get("prioriteit")
-        if prioriteit is None:
-            prioriteit = 0
-        else:
-            prioriteit = int(prioriteit)
-        score += self.weights["prioriteit"].get(prioriteit, 0)
-        score += self.weights["deadline_group"].get(taak["deadline_group"], 0)
-        score += float(taak["risk_factor"] or 0) * self.weights["risk_factor"]
-        score += int(taak["leftover"] or 0) * self.weights["leftover"]
+        # Prioriteit
+        score += self.priority_weights.get(taak["priority"], 0)
+
+        # Deadline dichterbij = hogere score
+        deadline = taak["deadline"]
+        if deadline:
+            days_left = (datetime.fromisoformat(deadline) - datetime.now()).days
+            if days_left <= 0:
+                score += 5
+            elif days_left == 1:
+                score += 4
+            elif days_left <= 7:
+                score += 3
+            elif days_left <= 14:
+                score += 2
+            elif days_left <= 30:
+                score += 1
+
         return score
+
+    def get_expected_duration(self, cursor, taak):
+        """Bepaal verwachte duur via focus_logs of fallback = 30 min."""
+        # Eerst check view of logs
+        if taak["template_id"]:
+            cursor.execute("""
+                SELECT AVG(actual_duration) as avg_dur
+                FROM focus_logs
+                WHERE template_id=?
+            """, (taak["template_id"],))
+            row = cursor.fetchone()
+            if row and row["avg_dur"]:
+                return int(row["avg_dur"])
+        return 30  # fallback
 
     def calculate_scores_for_all_tasks(self):
         conn = sqlite3.connect(DATABASE_PATH)
         conn.row_factory = sqlite3.Row
         cursor = conn.cursor()
 
-        # Alleen uitvoerbare taken (type='taak')
         cursor.execute("""
-            SELECT id, naam, deadline_type, prioriteit, deadline_group, risk_factor, leftover
-            FROM taak
-            WHERE status = 'open' AND type = 'taak'
+            SELECT task_id, template_id, priority, deadline, status
+            FROM taken
+            WHERE status='open'
         """)
         taken = cursor.fetchall()
-        conn.close()
 
         result = []
         for taak in taken:
             score = self.calculate_task_score(dict(taak))
             result.append({
-                "id": taak["id"],
-                "naam": taak["naam"],
+                "id": taak["task_id"],
+                "template_id": taak["template_id"],
                 "score": score
             })
 
         result.sort(key=lambda x: x["score"], reverse=True)
-        return result
-
-    def plan_tasks(self, dagen=5):
-        taken = self.calculate_scores_for_all_tasks()
-
-        now = datetime.now().replace(second=0, microsecond=0)
-        if now.hour < 8:
-            starttijd = now.replace(hour=8, minute=0)
-        else:
-            starttijd = now
-
-        eindtijd = starttijd.replace(hour=17, minute=0)
-        geplande_dagen = 0
-
-        conn = sqlite3.connect(DATABASE_PATH)
-        conn.row_factory = sqlite3.Row
-        cursor = conn.cursor()
-
-        for taak in taken:
-            if geplande_dagen >= dagen:
-                break
-
-            cursor.execute("SELECT verwachte_duur FROM taak WHERE id=?", (taak["id"],))
-            duur = cursor.fetchone()["verwachte_duur"]
-
-            if duur is None:
-                print(
-                    f"[Rooted] ⚠️ Taak ID {taak['id']} ('{taak['naam']}') heeft geen verwachte_duur → wordt overgeslagen.")
-                continue
-
-            taak_eindtijd = starttijd + timedelta(minutes=duur)
-            if taak_eindtijd > eindtijd:
-                # Volgende dag om 08:00
-                starttijd = (starttijd + timedelta(days=1)).replace(hour=8, minute=0)
-                eindtijd = starttijd.replace(hour=17, minute=0)
-                geplande_dagen += 1
-
-                if geplande_dagen >= dagen:
-                    break
-
-                taak_eindtijd = starttijd + timedelta(minutes=duur)
-
-            print(
-                f"[Rooted] ➡️ Plan taak ID {taak['id']} ('{taak['naam']}') vanaf {starttijd.strftime('%Y-%m-%d %H:%M:%S')}")
-            cursor.execute("""
-                UPDATE taak SET ingepland_vanaf=? WHERE id=?
-            """, (starttijd.strftime("%Y-%m-%d %H:%M:%S"), taak["id"]))
-            conn.commit()
-
-            starttijd = taak_eindtijd
-
         conn.close()
+        return result
 
     def plan_next_task(self):
         conn = sqlite3.connect(DATABASE_PATH)
         conn.row_factory = sqlite3.Row
         cursor = conn.cursor()
 
-        while True:
-            cursor.execute("""
-                SELECT * FROM taak
-                WHERE status = 'open'
-                ORDER BY prioriteit DESC, deadline ASC
-                LIMIT 1
-            """)
-            taak = cursor.fetchone()
+        cursor.execute("""
+            SELECT * FROM taken
+            WHERE status='open'
+            ORDER BY deadline ASC, priority DESC
+            LIMIT 1
+        """)
+        taak = cursor.fetchone()
 
-            if not taak:
-                print("[Rooted] ✅ Geen open taken meer.")
-                break
+        if not taak:
+            print("[Rooted] ✅ Geen open taken meer.")
+            conn.close()
+            return
 
-            taak = dict(taak)
-            taak_type = taak.get("type", "taak")
-            print(f"[Rooted] ▶️ Bezig met taak ID {taak['id']} ('{taak['naam']}') - type: {taak_type}")
+        duur = self.get_expected_duration(cursor, taak)
+        starttijd = datetime.now().replace(second=0, microsecond=0)
+        eindtijd = starttijd + timedelta(minutes=duur)
 
-            if taak_type == "taak":
-                # Plan deze taak direct in
-                starttijd = datetime.now().replace(second=0, microsecond=0)
-                eindtijd = starttijd + timedelta(minutes=taak["verwachte_duur"] or 15)
-                cursor.execute("""
-                    UPDATE taak SET ingepland_vanaf=?, status='ingepland' WHERE id=?
-                """, (starttijd.strftime("%Y-%m-%d %H:%M:%S"), taak["id"]))
-                conn.commit()
-                print(f"[Rooted] ➡️ Taak '{taak['naam']}' ingepland vanaf {starttijd}.")
-                break  # Stop na deze taak!
+        cursor.execute("""
+            UPDATE taken
+            SET planned_start=?, planned_end=?, status='ingepland'
+            WHERE task_id=?
+        """, (
+            starttijd.strftime("%Y-%m-%d %H:%M:%S"),
+            eindtijd.strftime("%Y-%m-%d %H:%M:%S"),
+            taak["task_id"]
+        ))
+        conn.commit()
 
-            elif taak_type == "popup":
-                print(f"[Rooted] 🔔 Popup: {taak['beschrijving']}")
-                # TODO: Roep GUI-functie aan om popup te tonen
-                break
-
-            elif taak_type == "wachttijd":
-                print(f"[Rooted] ⏳ Wachttijd-taak '{taak['naam']}' - wachten op trigger.")
-                break
-
-            elif taak_type == "answertask":
-                correct = self.check_answer_filter(taak)
-                if correct:
-                    print(f"[Rooted] ✅ Antwoord klopt voor '{taak['naam']}', ga door met volgende taak.")
-                    cursor.execute("""
-                        UPDATE taak SET status='afgerond' WHERE id=?
-                    """, (taak["id"],))
-                    conn.commit()
-                    continue  # Direct door naar de volgende taak
-                else:
-                    print(f"[Rooted] ❌ Antwoord klopt niet voor '{taak['naam']}', planner stopt.")
-                    break
-
+        print(f"[Rooted] ➡️ Taak {taak['task_id']} ingepland van {starttijd} tot {eindtijd}.")
         conn.close()
-
-    def check_answer_filter(self, taak):
-        # TODO: Echte logica voor antwoordfilter
-        return True  # Voor nu altijd "juist"

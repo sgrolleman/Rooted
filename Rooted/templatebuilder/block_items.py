@@ -18,35 +18,13 @@ class BlockMixin:
         self.connections = []
         self.setFlag(QGraphicsItem.ItemIsMovable)
         self.setFlag(QGraphicsItem.ItemIsSelectable)
-        self.text_item = QGraphicsTextItem(self.name, self)
-        self.text_item.setDefaultTextColor(Qt.black)
-        self.text_item.setPos(-40, -10)
-
-    def set_block_color(self, color):
-        self.color = color
-        self.update()
-
-    def set_block_name(self, name):
-        self.name = name
-        self.text_item.setPlainText(name)
-
-    def mouseReleaseEvent(self, event):
-        view = self.scene().views()[0]
-        if getattr(view, "snap_to_grid", False):
-            grid_size = 20
-            x = round(self.pos().x() / grid_size) * grid_size
-            y = round(self.pos().y() / grid_size) * grid_size
-            self.setPos(x, y)
-        for connection in self.connections:
-            connection.update_position()
-        super().mouseReleaseEvent(event)
 
     def contextMenuEvent(self, event):
         menu = QMenu()
         prop_action = menu.addAction("Eigenschappen")
         duplicate_action = menu.addAction("Dupliceren")
         delete_action = menu.addAction("Verwijderen")
-        action = menu.exec(event.screenPos() if hasattr(event, "screenPos") else self.scene().views()[0].mapToGlobal(event.scenePos().toPoint()))
+        action = menu.exec(event.screenPos())
 
         if action == prop_action:
             dialog = BlockPropertiesDialog(self)
@@ -62,8 +40,12 @@ class BlockMixin:
                 view.temp_template_json["blocks"].append(clone.to_json())
         elif action == delete_action:
             self.delete_item()
-        else:
-            super().contextMenuEvent(event)
+
+    def mouseDoubleClickEvent(self, event):
+        dialog = BlockPropertiesDialog(self)
+        if dialog.exec():
+            dialog.apply_changes()
+        super().mouseDoubleClickEvent(event)
 
     def delete_item(self):
         scene = self.scene()
@@ -90,39 +72,121 @@ class BlockMixin:
 
 
 class TaskItem(QGraphicsRectItem, BlockMixin):
-    def __init__(self, name="Nieuwe Taak", duration=15, color=QColor("yellow"), schema="default", uid=None):
-        super().__init__(-50, -25, 100, 50)
-        self.duration = duration
+    def __init__(self, name="Nieuwe Taak", duration=30, priority="Normaal", category="Algemeen",
+                 project_id=None, template_id=None, deadline=None,
+                 planned_start=None, planned_end=None, notes="",
+                 color=QColor("yellow"), schema="default", uid=None):
+        # Rechthoekig blok 100x60
+        super().__init__(-50, -30, 100, 60)
+
+        # Basisgegevens
+        self.name = name
+        self.duration = duration  # minuten
+
+        # Context
+        self.priority = priority
+        self.category = category
+        self.project_id = project_id
+        self.template_id = template_id
+
+        # Planning
+        self.deadline = deadline
+        self.planned_start = planned_start
+        self.planned_end = planned_end
+
+        # Metadata
+        self.notes = notes
+
+        # Algemene blok-instellingen (kleur, schema, uid, connecties, flags)
         self.init_block(name, color, schema, uid)
 
+    # ----------------------------
+    # Tekenen van het blok
+    # ----------------------------
     def paint(self, painter, option, widget):
         painter.setBrush(QBrush(self.color))
         painter.setPen(QPen(Qt.black, 2))
         painter.drawRect(self.rect())
 
-    def show_context_menu(self, global_pos):
+        # Tekst samenstellen
+        lines = [self.name]
+        if self.duration:
+            lines.append(f"{self.duration} min")
+        if self.priority:
+            lines.append(self.priority)
+
+        # Tekst centreren
+        painter.drawText(self.rect(), Qt.AlignCenter, "\n".join(lines))
+
+    # ----------------------------
+    # Contextmenu (rechtermuisklik)
+    # ----------------------------
+    def contextMenuEvent(self, event):
         menu = QMenu()
         prop_action = menu.addAction("Eigenschappen")
+        duplicate_action = menu.addAction("Dupliceren")
         delete_action = menu.addAction("Verwijderen")
-        action = menu.exec(global_pos)
+        action = menu.exec(event.screenPos())
+
         if action == prop_action:
             dialog = BlockPropertiesDialog(self)
             if dialog.exec():
                 dialog.apply_changes()
+        elif action == duplicate_action:
+            clone = self.clone()
+            clone.setPos(self.pos() + QPointF(30, 30))
+            scene = self.scene()
+            scene.addItem(clone)
+            view = scene.views()[0].parent()
+            if hasattr(view, "temp_template_json"):
+                view.temp_template_json["blocks"].append(clone.to_json())
         elif action == delete_action:
             self.delete_item()
 
+    # ----------------------------
+    # Dubbelklik
+    # ----------------------------
     def mouseDoubleClickEvent(self, event):
         dialog = BlockPropertiesDialog(self)
         if dialog.exec():
             dialog.apply_changes()
         super().mouseDoubleClickEvent(event)
 
+    # ----------------------------
+    # JSON-export
+    # ----------------------------
+    def to_json(self):
+        return {
+            "type": "taak",
+            "name": self.name,
+            "duration": self.duration,
+            "priority": self.priority,
+            "category": self.category,
+            "project_id": self.project_id,
+            "template_id": self.template_id,
+            "deadline": self.deadline,
+            "planned_start": self.planned_start,
+            "planned_end": self.planned_end,
+            "notes": self.notes,
+            "color": self.color.name() if hasattr(self.color, "name") else self.color,
+            "schema": self.schema,
+            "pos": [self.pos().x(), self.pos().y()],
+            "uid": self.uid
+        }
+
     @classmethod
     def from_json(cls, data):
         item = cls(
             name=data.get("name", "Taak"),
-            duration=data.get("duration", 15),
+            duration=data.get("duration", 30),
+            priority=data.get("priority", "Normaal"),
+            category=data.get("category", "Algemeen"),
+            project_id=data.get("project_id"),
+            template_id=data.get("template_id"),
+            deadline=data.get("deadline"),
+            planned_start=data.get("planned_start"),
+            planned_end=data.get("planned_end"),
+            notes=data.get("notes", ""),
             color=QColor(data.get("color", "#ffff00")),
             schema=data.get("schema", "default"),
             uid=data.get("uid")
@@ -130,26 +194,25 @@ class TaskItem(QGraphicsRectItem, BlockMixin):
         item.setPos(*data.get("pos", [0, 0]))
         return item
 
-    def to_json(self):
-        return {
-            "type": "taak",
-            "name": self.name,
-            "duration": self.duration,
-            "color": self.color.name() if hasattr(self.color, "name") else self.color,
-            "schema": self.schema,
-            "pos": [self.pos().x(), self.pos().y()],
-            "uid": self.uid
-        }
-
+    # ----------------------------
+    # Kopiëren
+    # ----------------------------
     def clone(self):
         return TaskItem(
             name=self.name,
             duration=self.duration,
+            priority=self.priority,
+            category=self.category,
+            project_id=self.project_id,
+            template_id=self.template_id,
+            deadline=self.deadline,
+            planned_start=self.planned_start,
+            planned_end=self.planned_end,
+            notes=self.notes,
             color=self.color,
             schema=self.schema,
             uid=str(uuid.uuid4())
         )
-
 
 class WaitItem(QGraphicsPolygonItem, BlockMixin):
     def __init__(self, name="Wachttijd", delay=1, color=QColor("orange"), schema="default", uid=None):
